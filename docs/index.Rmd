@@ -1,0 +1,223 @@
+---
+title: "nasa-neo-r"
+author: "brandon navarrete"
+date: "3/8/2023"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Let's see if the pacman package is already installed and, if not, installs it. 
+
+### use p_load() to install and load other packages as needed.=
+```{r}
+if (!require("pacman")) install.packages("pacman")
+```
+```{r}
+pacman::p_load(lattice, caret, tidyverse, glmnet)
+```
+
+# Let's pull data in. 
+```{r}
+# A local csv
+df <- read_csv('neo_v2.csv')
+```
+
+# Let's look at our data!
+```{r}
+# The first 5 entries
+head(df,5)
+```
+# set seed for consistency
+```{r}
+set.seed(42)
+```
+
+# Prepare
+* id, name, orbiting_body, sentry_object were all dropped due to not being helpful or repeating information
+
+* target variable one-hot encoded for m.l
+
+* the outliers were left in
+
+* nulls not present
+
+```{r}
+# counting null values in df
+sum(is.na(df))
+```
+
+
+* subset to drop columns
+```{r}
+# columns I do not want to use right now
+df = subset(df,select = -c(id,name,orbiting_body, sentry_object))
+```
+
+```{r}
+# checking to see if it took
+head(df,1)
+```
+
+# Explore
+
+* How many objects are inert?
+
+* Will diameter have a role in hazard status?
+
+* Will absolute magnitude have a role in hazard status?
+
+* Will velocity have a role in hazard status?
+
+
+# Data Splitting
+```{r}
+# converting boolean to numbers (0 = safe, 1 = hazardous)
+df$hazardous <- as.numeric(df$hazardous)
+```
+
+```{r}
+# creating a percentage split for training data vs testing data
+training_index <- createDataPartition(df$hazardous, p=0.8, list = FALSE)
+```
+
+
+```{r}
+# selecting data based on index
+training_set <- df[training_index,] # train set
+testing_set <- df[-training_index,] # train set
+```
+
+# let's look at how much data we have per set vs the Whole dataframe
+```{r}
+# shows the number of rows, checking to see if training and test set match full dataframe
+nrow(training_set) 
+nrow(testing_set)
+nrow(df)
+```
+
+```{r}
+# factor our y variable, of zero and one.
+training_set$hazardous <- factor(training_set$hazardous)
+testing_set$hazardous <- factor(testing_set$hazardous)
+```
+
+```{r}
+# Load e1071 package
+#The package provides a set of functions for SVMs including classification, regression, and distribution estimation.
+library(e1071)
+```
+
+
+# Model Creation for GlM
+```{r}
+# train GLM model
+# training on a generalized linear model, specifying that we are predicting on the hazardous column, using the training set.
+# By default, the train() function uses 10-fold cross-validation,
+model <- train(hazardous ~ ., data = training_set, method = "glm")
+
+```
+# Model Tuning glmnet
+
+```{r}
+# Create a grid of hyperparameters
+grid <- expand.grid(alpha = seq(0, 1, 0.1), lambda = c(0, 0.001, 0.01, 0.1, 1))
+```
+
+``` {r}
+# Train the model using cross-validation and the specified grid of hyperparameters
+# Can fit models for a variety of response distributions, including #binomial (logistic regression), Poisson, and Gaussian.
+#glmnet() supports both ridge and lasso regularization, as well as elastic #net regularization, which provides a compromise between the two.
+model <- train(hazardous ~ ., data = training_set, method = "glmnet",
+               trControl = trainControl(method = "cv", number = 10),
+               tuneGrid = grid,
+               metric = "Recall")
+```
+```{r}
+model$results
+
+```
+
+# predict from model
+```{r}
+# Get predicted probabilities for the test set
+# Using predict() on the new data, test set.
+predictions <- predict(model, newdata = testing_set, type = "prob")
+
+```
+
+```{r}
+summary(model)
+```
+
+```{r}
+# looking at what these look like
+# each index is a observation and the columns are the probalility off being in that category. They should be inverse of each other.
+
+head(predictions,5)
+```
+
+```{r}
+# Set decision threshold to 0.05
+threshold <- 0.05
+
+# Create vector of predicted classes based on the threshold
+# For each row of the "predictions" matrix, the code checks whether the probability of belonging to class "1"  is greater than the threshold of 0.05. If the probability is greater than the threshold, the predicted class is set to 1. Otherwise, the predicted class is set to 0.
+predicted_classes <- ifelse(predictions[, "1"] > threshold, 1, 0)
+
+```
+
+
+# Let's see how we performed by looking at what was captured or missed.
+```{r}
+# Create confusion matrix for the predicted classes
+confusion_matrix <- table(predicted_classes, testing_set$hazardous)
+```
+
+```{r}
+# out of all of the hazardous object, we captured 1748...
+print(confusion_matrix)
+```
+
+> The 1's represent the hazardous objects, the true label and the predicted label. Out of 1761 hazardous objects in our test set we have captured 1750...99% Recall.
+
+
+```{r}
+# Create a data frame with the confusion matrix values
+confusion_matrix <- data.frame(
+  Actual = c("Inert", "Hazardous"),
+  Predicted_Inert = c(10573, 11),
+  Predicted_Haz = c(5833, 1750)
+)
+
+# Convert the data frame to long format
+confusion_matrix_long <- reshape2::melt(confusion_matrix, id.vars = "Actual")
+
+# Create the confusion matrix chart
+ggplot(confusion_matrix_long, aes(x = Actual, y = variable, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  geom_text(aes(label = value), size = 12) +
+  labs(x = "Actual", y = "Predicted", fill = "Count") +
+  theme_classic()
+
+```
+
+
+```{r}
+
+# feature importance
+Importance <- varImp(model)
+```
+
+```{r}
+
+# What features were helpful and in what order?
+Importance
+
+```
+
+
+
+
+
