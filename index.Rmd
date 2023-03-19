@@ -44,6 +44,7 @@ set.seed(42)
 
 ```{r}
 # counting null values in df
+
 sum(is.na(df))
 ```
 
