@@ -212,7 +212,7 @@ Importance <- varImp(model)
 
 ```{r}
 
-# feature importance
+# What features were helpful and in what order?
 Importance
 
 ```
